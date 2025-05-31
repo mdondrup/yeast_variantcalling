@@ -10,8 +10,8 @@ Trimming and QC is done with fastp.
 
 ## Usage
 
-Place all paired-end (must contain `R1`, `R2` or `_1`, `_2` in their file names) `.fastq` or `fastq.gz` files in the Fastq directory.
-Configure the reference genome files. For NASP, a genome file with mitochondrial genome removed can be used.
+Place all paired-end (must contain `R1`, `R2` or `_1`, `_2` in their file names) `.fastq` or `fastq.gz` files in the Fastq/ directory.
+Configure the reference genome files placed in the `reference-genome/` directory. For NASP, a genome file with mitochondrial genome removed can be used.
 
 Configure the reference genomes and ploidy settings in the Snakemake file. Dependencies are installed by conda.
 
