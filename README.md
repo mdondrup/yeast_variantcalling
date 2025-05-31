@@ -4,7 +4,7 @@
 
 
 
-A Snakemake workflow for variant detection and filtering with GATK 4, also generates assemblies with NASP.
+A Snakemake workflow for variant detection and filtering with GATK 4, also generates phylogenies and assemblies with SPades, NASP, and IQ-Tree.
 Trimming and QC is done with fastp.
 
 
