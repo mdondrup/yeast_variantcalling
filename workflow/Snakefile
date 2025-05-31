@@ -1,4 +1,348 @@
-# Main entrypoint of the workflow. 
-# Please follow the best practices: 
-# https://snakemake.readthedocs.io/en/stable/snakefiles/best_practices.html,
-# in particular regarding the standardized folder structure mentioned there. 
+# Snake file for running variant detection with GATK
+# Runs the WF on all fastq files in a directory
+
+#configfile: "config/config.yaml"
+
+REFERENCE="/export/elixiruibfs/Elixir_Dolan/Kveik_Yeast_2022/reference-genome/GCF_000146045.2_R64_genomic.fna"
+REF_NOMT="/export/elixiruibfs/Elixir_Dolan/Kveik_Yeast_2022/reference-genome/GCF_000146045.2_R64_genomic-sine-mt.fna"
+PLOIDY=[2,4]
+
+import os
+import re
+
+onsuccess:
+    print("Workflow finished, no error")
+    shell("send_message.py 'Variant pipeline finished, no error'")
+
+onerror:
+    print("An error occurred, see the log")
+    shell("send_message.py 'An error occured in Variant pipeline, see the log: {log}'")
+    
+onstart:
+    print ("----------------------------------------------------------------------------")
+    print ("Starting Variant analysis pipeline")
+    print ("----------------------------------------------------------------------------")
+    shell('send_message.py "Variant pipeline started at $(date)"')
+
+
+
+
+## automatically retrieve all the samples
+
+def get_samples(wildcards):
+    fastqdir = "Fastqs/"
+    suffix1 = "_R1_001.fastq.gz"
+    suffix2 = "_R1_merged_001.fastq.gz"
+    suffix3 = "_1.fastq"	
+    return [f.replace(suffix1, "").replace(suffix2, '').replace(suffix3, '') 
+	for f in os.listdir(fastqdir) if f.endswith(suffix1) or f.endswith(suffix2) or f.endswith(suffix3)]
+    
+SAMPLES = get_samples(None)
+#print (SAMPLES)
+
+print("Found "+ str(len(SAMPLES)) +" samples.")
+
+#Functionn to get the fastq file pair
+
+def get_illumina_fastqs(wildcards):
+    fastq_dir = "Fastqs"
+    r1 = [os.path.join(fastq_dir, f) for f in os.listdir(fastq_dir) 
+		if (re.search('^' + wildcards.sample + ".*R1_.*001\\.fastq\\.gz$", f) or re.search('^' + wildcards.sample + ".*_1\\.fastq$", f) )]
+    r2 = [os.path.join(fastq_dir, f) for f in os.listdir(fastq_dir)
+                if (re.search('^' + wildcards.sample + ".*R2_.*001\\.fastq\\.gz$", f) or re.search('^' + wildcards.sample + ".*_2\\.fastq$", f) )]
+    #print("Sample: " + wildcards.sample)
+    #print('  - R1: ' + r1[0] + ' R2:' + r2[0] )
+
+    return ([r1[0], r2[0]])
+#
+
+rule all:
+	input:
+            setup=".setup_done",
+		#r1trimmed=expand("fastp/{sample}.trimmed.1.fastq.gz", sample=SAMPLES),
+		#r2trimmed=expand("fastp/{sample}.trimmed.2.fastq.gz", sample=SAMPLES)
+		#bam = expand("aligned/{sample}.markdup.bam", sample=SAMPLES)		
+		#gvcfidx=expand("vcf/{sample}.Ploidy{ploidy}.g.vcf.idx", sample=SAMPLES, ploidy=PLOIDY),
+            stats1=expand("vcf/joint-variantcalls_Ploidy{ploidy}.stats", ploidy=PLOIDY),
+            stats2=expand("vcf/selected-SNPINDEL_Ploidy{ploidy}.stats", ploidy=PLOIDY),
+            assm=expand("spades/{sample}-spades-assm", sample=SAMPLES),
+            bestsnps="nasp/nasp_output/matrices/bestsnp.fasta",
+            iqtree="iqtree/Samples-MFP.contree"  
+            
+
+rule setup: 
+    output: ".setup_done"
+    shell:
+    	"""
+    	mkdir -p fastp aligned vcf spades
+		touch .setup_done
+		"""	
+
+rule fastp_pe:
+	conda: "envs/fastp.yaml"
+	input:
+		r=get_illumina_fastqs
+	output:
+		r1="fastp/{sample}.trimmed.1.fastq.gz",
+		r2="fastp/{sample}.trimmed.2.fastq.gz",
+		html="fastp/{sample}.fastp_report.html",
+		json="fastp/{sample}.fastp_report.json"
+	threads: 16
+	shell:
+		"""
+	fastp -w {threads} -i {input.r[0]} -I {input.r[1]} -o {output.r1} -O {output.r2}  -j {output.json} -h {output.html}
+		"""
+
+rule spades_assembly:
+    conda: "envs/spades.yaml"
+    input: 
+        r1="fastp/{sample}.trimmed.1.fastq.gz",
+        r2="fastp/{sample}.trimmed.2.fastq.gz"
+    output: directory("spades/{sample}-spades-assm")
+    log: "logs/spades-{sample}.log"
+    threads: 40
+    shell:
+        r"""
+        mkdir -p spades/
+        spades.py --checkpoints all --isolate -t {threads} -m 1024 -1 {input.r1} -2 {input.r2} -o {output} > {log} 2>&1
+
+        """
+
+rule copy_nasp_input: 
+    input:
+        "spades/{sample}-spades-assm/scaffolds.fasta"
+    output:
+        "nasp/{sample}.fasta"
+    shell:      
+        """
+        mkdir -p nasp
+        cp {input} {output}
+        """
+
+rule run_nasp:
+    conda: "envs/nasp.yaml"
+    input: expand("nasp/{sample}.fasta", sample=SAMPLES)
+    output: "nasp/nasp_output/matrices/bestsnp.fasta"
+    log: "nasp/nasp_output/runlog.txt"
+    params: 
+        ref=REF_NOMT
+    threads: 1000 # make sure it's run interactively 
+    message: "Starting interactive NASP run"   
+    shell:
+        """
+        rm -f {log}
+        cd nasp
+        nasp {params.ref} nasp_output
+        sleep 30;
+        JOBS=$(grep -e "jobid = " ../{log} | cut -f 2 -d "=")
+        echo waiting for NASP jobs to finish
+        while kill -0 $JOBS; do sleep 300; done; 
+
+        """        
+
+rule iqtree_MFP:
+    conda: "envs/iqtree.yaml"
+    input: "nasp/nasp_output/matrices/bestsnp.fasta"
+    output:
+        "iqtree/Samples-MFP.contree"  
+    log: "logs/iqtree-MFP.log"
+    shell:
+        """
+        mkdir -p $(dirname {output})  # Ensure the iqtree directory exists
+        iqtree2 -s {input} -m MFP+ASC -bb 1000 -nt AUTO -pre iqtree/Samples-MFP > {log} 2>&1
+        """  
+
+           
+
+rule bwa:
+	conda: "envs/bwasam.yaml"
+	input: 
+		r1="fastp/{sample}.trimmed.1.fastq.gz",
+		r2="fastp/{sample}.trimmed.2.fastq.gz",
+		ref=REFERENCE
+	output:
+		bam="aligned/{sample}.aligned.bam",
+		bai="aligned/{sample}.aligned.bam.bai"	
+	threads: 30
+	shell:
+		"""
+		set -x
+		ID={wildcards.sample}
+		echo $ID
+		RGSTR="@RG\\tID:$ID\\tSM:sample_$ID"
+        	bwa mem -t{threads} -R "$RGSTR" {input.ref} {input.r1} {input.r2} | samtools sort -@ {threads} -o {output.bam} -
+        	samtools index {output.bam}
+		"""
+
+rule samtools_filter:
+	conda: "envs/bwasam.yaml"
+	input:  bam="aligned/{sample}.aligned.bam",
+                bai="aligned/{sample}.aligned.bam.bai"
+	output: bam="aligned/{sample}.filtered.bam",
+                bai="aligned/{sample}.filtered.bam.bai"
+	threads: 30
+	shell: 
+		"""
+	samtools view -@ {threads} -bq 50 {input.bam} | samtools sort -@ {threads} -o {output.bam}
+        samtools index {output.bam}
+		"""
+rule mark_duplicates:
+	conda: "envs/gatk4.yaml"
+	input: bam="aligned/{sample}.filtered.bam",
+               bai="aligned/{sample}.filtered.bam.bai"
+	output: bam="aligned/{sample}.markdup.bam",
+                bai="aligned/{sample}.markdup.bam.bai"
+	params:
+		reference=REFERENCE
+	threads: 60
+	resources: tmpdir="/export/scratch/tmp",
+		mem="200G"
+	shell:
+		"""
+		mkdir -p $TMPDIR
+		JAVA_OPTS="-Xmx{resources.mem} -Djava.io.tmpdir=$TMPDIR"
+		gatk --java-options "$JAVA_OPTS" MarkDuplicatesSpark --spark-master local[{threads}] \
+		-R {params.reference} -I {input.bam} -O {output.bam}
+		"""
+
+rule haplotype_caller:
+	conda: "envs/gatk4.yaml"
+	input: bam="aligned/{sample}.markdup.bam"
+	output: gvcf="vcf/{sample}.Ploidy{ploidy}.g.vcf"
+	params: reference=REFERENCE
+	threads: 30
+	resources: tmpdir="/export/scratch/tmp",
+		mem="256G"
+	shell:
+		"""
+		JAVA_OPTS="-XX:ConcGCThreads=10 -XX:ParallelGCThreads=10 -Xmx{resources.mem} -Djava.io.tmpdir=$TMPDIR"
+		gatk --java-options "$JAVA_OPTS" HaplotypeCaller --ploidy {wildcards.ploidy} --native-pair-hmm-threads {threads} \
+		-R {params.reference} -G StandardAnnotation -G AS_StandardAnnotation -G StandardHCAnnotation \
+   		--tmp-dir $TMPDIR \
+   		-I {input.bam} -O {output.gvcf} -ERC GVCF 
+		"""
+rule index_vcf:
+    conda: "envs/gatk4.yaml"
+    input: "vcf/{sample}.Ploidy{ploidy}.g.vcf"
+    output:  "vcf/{sample}.Ploidy{ploidy}.g.vcf.idx"
+    threads: 10
+    resources: tmpdir="/export/scratch/tmp",
+	       mem="200G"
+
+
+    shell:
+        """
+        JAVA_OPTS="-XX:ConcGCThreads=10 -XX:ParallelGCThreads=10 -Xmx200G -Djava.io.tmpdir={resources.tmpdir}"
+        gatk --java-options "$JAVA_OPTS" IndexFeatureFile --tmp-dir {resources.tmpdir} -I {input}
+
+        """
+
+               
+INTERVALS=" -L NC_001133.9 -L NC_001134.8 -L NC_001135.5 -L NC_001136.10 -L NC_001137.3 -L NC_001138.5 -L NC_001139.9 -L NC_001140.6 -L NC_001141.2 -L NC_001142.9 -L NC_001143.9 -L NC_001144.5 -L NC_001145.3 -L NC_001146.8 -L NC_001147.6 -L NC_001148.4 "
+
+
+#for ploidy in PLOIDY:
+
+rule:
+    name: "dbimport_joint_call_{ploidy}"
+    conda: "envs/gatk4.yaml"
+    input: gvcfs=expand("vcf/{sample}.Ploidy{{ploidy}}.g.vcf", sample=SAMPLES),
+           gvcfidx=expand("vcf/{sample}.Ploidy{{ploidy}}.g.vcf.idx", sample=SAMPLES)
+    output: dir=directory("vcf/GenomeDB_Ploidy{ploidy}"),
+            vcf="vcf/joint-variantcalls_Ploidy{ploidy}.vcf"
+    threads: 10
+    params: reference=REFERENCE
+    resources: tmpdir="/export/scratch/tmp",
+	       mem="200G"
+               
+    shell:
+        r"""
+    JAVA_OPTS="-XX:ConcGCThreads=10 -XX:ParallelGCThreads=10 -Xmx200G -Djava.io.tmpdir={resources.tmpdir}"         
+    DB={output.dir}
+    V=""
+    for f in {input.gvcfs}
+    do
+    V="$V -V $f"
+    done
+
+    echo running dbimport for PLOIDY: {wildcards.ploidy}
+    echo importing into  output dir: {output.dir}
+    echo input files: {input.gvcfs}
+    
+    gatk --java-options "$JAVA_OPTS" GenomicsDBImport \
+    --tmp-dir $TMPDIR \
+    $V \
+    --genomicsdb-workspace-path $DB \
+    {INTERVALS}
+    
+    gatk --java-options "$JAVA_OPTS" GenotypeGVCFs \
+    --tmp-dir $TMPDIR \
+    -R {params.reference} \
+    -V gendb://$DB \
+    -G StandardAnnotation -G AS_StandardAnnotation \
+    -O {output.vcf}    
+        """
+    
+rule gatk_variant_filtration:
+    conda: "envs/gatk4.yaml"
+    input: "vcf/joint-variantcalls_Ploidy{ploidy}.vcf"
+    output: "vcf/filtered-variantcalls_Ploidy{ploidy}.vcf"
+    params: reference=REFERENCE
+    threads: 60
+    resources: tmpdir="/export/scratch/tmp",
+	       mem="200G"
+    shell:
+        """
+    JAVA_OPTS="-XX:ConcGCThreads=10 -XX:ParallelGCThreads=10 -Xmx{resources.mem} -Djava.io.tmpdir=$TMPDIR"
+    gatk  --java-options "$JAVA_OPTS" VariantFiltration \
+    -R {params.reference} \
+    -V {input}  \
+    -O {output} \
+    --filter-expression "MQ < 50.00" \
+    --filter-name "mapping_quality" \
+    --filter-expression "QUAL / DP < 2.0" \
+    --filter-name "qual_ratio_filter" \
+    --filter-expression "DP < 5" \
+    --filter-name "depth_filter" \
+    --G-filter "GQ < 30" \
+    --G-filter-name "genotype_quality_filter" \
+    --set-filtered-genotype-to-no-call false  
+        """    
+
+rule gatk_variant_selection:
+    conda: "envs/gatk4.yaml"
+    input: "vcf/filtered-variantcalls_Ploidy{ploidy}.vcf"
+    output: "vcf/selected-SNPINDEL_Ploidy{ploidy}.vcf"       
+    params: reference=REFERENCE
+    threads: 60
+    resources: tmpdir="/export/scratch/tmp",
+	       mem="200G"
+    shell:
+        """
+    JAVA_OPTS="-XX:ConcGCThreads=10 -XX:ParallelGCThreads=10 -Xmx{resources.mem} -Djava.io.tmpdir=$TMPDIR"
+    gatk --java-options "$JAVA_OPTS" SelectVariants \
+   -R {params.reference} \
+   -V {input} \
+   -O {output} \
+   --select-type-to-include SNP \
+   --select-type-to-include INDEL \
+   --exclude-filtered true \
+   --remove-unused-alternates \
+   --restrict-alleles-to BIALLELIC
+        """
+
+for method in ["filtered-variantcalls", "selected-SNPINDEL"]:
+        
+    rule:
+        name: "bcftools_stats_{method}"
+        conda: "envs/bcftools.yaml"
+        input: vcf="vcf/{method}_Ploidy{ploidy}.vcf"
+        output: stats="vcf/{method}_Ploidy{ploidy}.stats"
+        shell:
+            """
+            bcftools stats -s - {input.vcf} > {output.stats}
+          
+
+            """
+
+                
