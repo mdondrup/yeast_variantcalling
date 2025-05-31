@@ -129,7 +129,16 @@ rule run_nasp:
     params: 
         ref=REF_NOMT
     threads: 1000 # make sure it's run interactively 
-    message: "Starting interactive NASP run"   
+    message: 
+        """
+        Starting interactive NASP run. This rule attempts to wait for the NASP pipeline to complete. 
+        This may or may not work depending on your OS because NASP is a pipeline on its own. 
+        If the job gets killed by Snakemake, you may want to run: 
+        micromamba create -f envs/nasp.yaml
+        micromamba activate nasp
+        cd nasp
+        nasp {params.ref} nasp_output
+        """   
     shell:
         """
         rm -f {log}
