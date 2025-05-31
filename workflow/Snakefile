@@ -2,9 +2,10 @@
 # Runs the WF on all fastq files in a directory
 
 #configfile: "config/config.yaml"
-
-REFERENCE="/export/elixiruibfs/Elixir_Dolan/Kveik_Yeast_2022/reference-genome/GCF_000146045.2_R64_genomic.fna"
-REF_NOMT="/export/elixiruibfs/Elixir_Dolan/Kveik_Yeast_2022/reference-genome/GCF_000146045.2_R64_genomic-sine-mt.fna"
+# configure reference genomes here:
+REFERENCE="../reference-genome/GCF_000146045.2_R64_genomic.fna"
+REF_NOMT="../reference-genome/GCF_000146045.2_R64_genomic-sine-mt.fna"
+# Ploidy settings for GATK; runs the workflow for each value if multiple values are specified.
 PLOIDY=[2,4]
 
 import os
@@ -12,17 +13,18 @@ import re
 
 onsuccess:
     print("Workflow finished, no error")
-    shell("send_message.py 'Variant pipeline finished, no error'")
+    # Uncomment this if you have a messenger script installed.
+    # shell("send_message.py 'Variant pipeline finished, no error'")
 
 onerror:
     print("An error occurred, see the log")
-    shell("send_message.py 'An error occured in Variant pipeline, see the log: {log}'")
+    # shell("send_message.py 'An error occurred in Variant pipeline, see the log: {log}'")
     
 onstart:
     print ("----------------------------------------------------------------------------")
     print ("Starting Variant analysis pipeline")
     print ("----------------------------------------------------------------------------")
-    shell('send_message.py "Variant pipeline started at $(date)"')
+    # shell('send_message.py "Variant pipeline started at $(date)"')
 
 
 
