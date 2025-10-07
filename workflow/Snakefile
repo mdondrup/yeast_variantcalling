@@ -145,11 +145,12 @@ rule run_nasp:
         """
         rm -f {log}
         cd nasp
-        nasp {params.ref} nasp_output
+        tools/NASP/nasp {params.ref} nasp_output
         sleep 30;
         JOBS=$(grep -e "jobid = " ../{log} | cut -f 2 -d "=")
         echo waiting for NASP jobs to finish
-        while kill -0 $JOBS; do sleep 300; done; 
+        # wait for all jobs to finish
+        while $(kill -0 $JOBS 2>/dev/null); do sleep 300; done; 
 
         """        
 
