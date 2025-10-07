@@ -34,6 +34,8 @@ include: "rules/setup.smk"
 ## automatically retrieve all the samples
 
 def get_samples(wildcards):
+    if not os.path.exists("Fastqs"):
+        return []   
     fastqdir = "Fastqs/"
     suffix1 = "_R1_001.fastq.gz"
     suffix2 = "_R1_merged_001.fastq.gz"

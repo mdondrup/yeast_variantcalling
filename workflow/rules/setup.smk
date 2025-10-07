@@ -5,7 +5,7 @@ rule setup:
     output: ".setup_done"
     shell:
     	"""
-    	mkdir -p fastp aligned vcf spades
+    	mkdir -p Fastqs fastp aligned vcf spades
 		touch .setup_done
 		"""	
 
