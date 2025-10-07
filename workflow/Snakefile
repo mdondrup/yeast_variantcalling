@@ -76,13 +76,7 @@ rule all:
             iqtree="iqtree/Samples-MFP.contree"  
             
 
-rule setup: 
-    output: ".setup_done"
-    shell:
-    	"""
-    	mkdir -p fastp aligned vcf spades
-		touch .setup_done
-		"""	
+
 
 rule fastp_pe:
 	conda: "envs/fastp.yaml"
