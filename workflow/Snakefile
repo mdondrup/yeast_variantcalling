@@ -150,7 +150,7 @@ rule run_nasp:
         JOBS=$(grep -e "jobid = " ../{log} | cut -f 2 -d "=")
         echo waiting for NASP jobs to finish
         # wait for all jobs to finish
-        while $(kill -0 $JOBS 2>/dev/null); do sleep 300; done; 
+        while $(kill -0 $JOBS 2>/dev/null); do echo "." ; sleep 300; done; 
 
         """        
 

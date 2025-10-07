@@ -13,7 +13,7 @@ rule install_nasp:
     conda: "envs/nasp.yaml"
     output: "tools/NASP/nasptool/nasptool_linux_64"
     params:
-        version: "v1.2.1-p1md"
+        version=v1.2.1-p1md
     message:
         "Installing NASP version {params.version}"
     shell:
