@@ -1,7 +1,7 @@
 ### Setup directories and install dependencies
 
 rule setup: 
-    input: "tools/NASP/nasptool/nasptool_linux_64"
+    input: "tools/NASP/nasp/nasptool_linux_64"
     output: ".setup_done"
     shell:
     	"""
@@ -11,7 +11,7 @@ rule setup:
 
 rule install_nasp:
     conda: "../envs/nasp.yaml"
-    output: "tools/NASP/nasptool/nasptool_linux_64"
+    output: "tools/NASP/nasp/nasptool_linux_64"
     params:
         version="v1.2.1-p1md"
     message:
