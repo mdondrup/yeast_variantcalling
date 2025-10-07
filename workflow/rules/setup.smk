@@ -21,7 +21,7 @@ rule install_nasp:
         mkdir -p tools
         cd tools
         rm -rf NASP
-        git clone --branch v{params.version} https://github.com/mdondrup/NASP.git  
+        git clone --branch {params.version} https://github.com/mdondrup/NASP.git  
         cd NASP/nasp/nasptool
         go build -o ../nasptool_linux_64
         """ 
