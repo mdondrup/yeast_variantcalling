@@ -1,0 +1,16 @@
+name: iqtree
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - _libgcc_mutex=0.1=conda_forge
+  - _openmp_mutex=4.5=2_gnu
+  - decenttree=1.0.0=h3f9e6b0_0
+  - iqtree=3.0.1=h503566f_0
+  - libgcc=15.2.0=h767d61c_6
+  - libgcc-ng=15.2.0=h69a702a_6
+  - libgomp=15.2.0=h767d61c_6
+  - libstdcxx=15.2.0=h8f9b012_6
+  - libstdcxx-ng=15.2.0=h4852527_6
+
+prefix: "/Home/siv4/mdo041/.local/share/mamba/envs/iqtree"

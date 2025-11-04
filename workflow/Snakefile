@@ -1,5 +1,7 @@
 # Snake file for running variant detection with GATK
 # Runs the WF on all fastq files in a directory
+from snakemake.utils import min_version
+min_version("8.2")
 
 configfile: "config/config.yaml"
 # configure reference genomes here:
@@ -39,7 +41,7 @@ def get_samples(wildcards):
     fastqdir = "Fastqs/"
     suffix1 = "_R1_001.fastq.gz"
     suffix2 = "_R1_merged_001.fastq.gz"
-    suffix3 = "_1.fastq"	
+    suffix3 = "_1.fastq.gz"	
     return [f.replace(suffix1, "").replace(suffix2, '').replace(suffix3, '') 
 	for f in os.listdir(fastqdir) if f.endswith(suffix1) or f.endswith(suffix2) or f.endswith(suffix3)]
     
@@ -53,9 +55,9 @@ print("Found "+ str(len(SAMPLES)) +" samples.")
 def get_illumina_fastqs(wildcards):
     fastq_dir = "Fastqs"
     r1 = [os.path.join(fastq_dir, f) for f in os.listdir(fastq_dir) 
-		if (re.search('^' + wildcards.sample + ".*R1_.*001\\.fastq\\.gz$", f) or re.search('^' + wildcards.sample + ".*_1\\.fastq$", f) )]
+		if (re.search('^' + wildcards.sample + ".*R1_.*001\\.fastq\\.gz$", f) or re.search('^' + wildcards.sample + ".*_1\\.fastq.gz$", f) )]
     r2 = [os.path.join(fastq_dir, f) for f in os.listdir(fastq_dir)
-                if (re.search('^' + wildcards.sample + ".*R2_.*001\\.fastq\\.gz$", f) or re.search('^' + wildcards.sample + ".*_2\\.fastq$", f) )]
+                if (re.search('^' + wildcards.sample + ".*R2_.*001\\.fastq\\.gz$", f) or re.search('^' + wildcards.sample + ".*_2\\.fastq.gz$", f) )]
     #print("Sample: " + wildcards.sample)
     #print('  - R1: ' + r1[0] + ' R2:' + r2[0] )
 
@@ -74,7 +76,24 @@ rule all:
             assm=expand("spades/{sample}-spades-assm", sample=SAMPLES),
             bestsnps="nasp/nasp_output/matrices/bestsnp.fasta",
             iqtree="iqtree/Samples-MFP.contree"  
-            
+
+## running only the phylogenetics part, no variant calling
+rule phylo:
+    input:
+        bestsnps="nasp/nasp_output/matrices/bestsnp.fasta",
+        iqtree="iqtree/Samples-MFP.contree"
+
+## running only the large phylo part, no variant calling
+rule phylo_large:
+    input:
+        bestsnps="nasp/nasp_output/matrices/bestsnp.fasta",
+        iqtree="iqtree/Samples-iqtree3-large.contree",
+        iqtree_alt="iqtree/Samples-iqtree3-large-alt.contree",
+        decenttree="nasp/nasp_output/matrices/bestsnp.nj.tree"
+    message:
+        """
+        Completed large phylogenetic analysis with IQ-TREE3 and DeCentTree.
+        """        
 
 
 
@@ -87,10 +106,10 @@ rule fastp_pe:
 		r2="fastp/{sample}.trimmed.2.fastq.gz",
 		html="fastp/{sample}.fastp_report.html",
 		json="fastp/{sample}.fastp_report.json"
-	threads: 16
+	threads: 2
 	shell:
 		"""
-	fastp -w {threads} -i {input.r[0]} -I {input.r[1]} -o {output.r1} -O {output.r2}  -j {output.json} -h {output.html}
+	fastp -w 10 -i {input.r[0]} -I {input.r[1]} -o {output.r1} -O {output.r2}  -j {output.json} -h {output.html}
 		"""
 
 rule spades_assembly:
@@ -98,13 +117,13 @@ rule spades_assembly:
     input: 
         r1="fastp/{sample}.trimmed.1.fastq.gz",
         r2="fastp/{sample}.trimmed.2.fastq.gz"
-    output: directory("spades/{sample}-spades-assm")
+    output: "spades/{sample}-spades-assm/scaffolds.fasta"
     log: "logs/spades-{sample}.log"
-    threads: 40
+    threads: 120
     shell:
         r"""
         mkdir -p spades/
-        spades.py --checkpoints all --isolate -t {threads} -m 1024 -1 {input.r1} -2 {input.r2} -o {output} > {log} 2>&1
+        spades.py --checkpoints none --isolate -t {threads} -m 1024 -1 {input.r1} -2 {input.r2} -o $(dirname {output}) > {log} 2>&1
 
         """
 
@@ -122,7 +141,7 @@ rule copy_nasp_input:
 rule run_nasp:
     conda: "envs/nasp.yaml"
     input: expand("nasp/{sample}.fasta", sample=SAMPLES)
-    output: "nasp/nasp_output/matrices/bestsnp.fasta"
+    output: ensure("nasp/nasp_output/matrices/bestsnp.fasta", non_empty=True)
     log: "nasp/nasp_output/runlog.txt"
     params: 
         ref=REF_NOMT
@@ -132,24 +151,45 @@ rule run_nasp:
         Starting interactive NASP run. This rule attempts to wait for the NASP pipeline to complete. 
         This may or may not work depending on your OS because NASP is a pipeline on its own. 
         If the job gets killed by Snakemake, you may want to run: 
-        micromamba create -f envs/nasp.yaml
-        micromamba activate nasp
-        cd nasp
-        nasp {params.ref} nasp_output
+          micromamba create -f envs/nasp.yaml
+          micromamba activate nasp
+          cd nasp
+          nasp {params.ref} nasp_output
         """   
     shell:
         """
         rm -f {log}
         cd nasp
-        tools/NASP/nasp {params.ref} nasp_output
+        nasp {params.ref} nasp_output
         sleep 30;
         JOBS=$(grep -e "jobid = " ../{log} | cut -f 2 -d "=")
         echo waiting for NASP jobs to finish
         # wait for all jobs to finish
-        while $(kill -0 $JOBS 2>/dev/null); do echo "." ; sleep 300; done; 
+        while $(kill -0 $JOBS 2>/dev/null); do echo "." ; sleep 30; done; 
 
         """        
 
+## create a decent tree with neighbor joining from the bestsnp.fasta
+rule descent_tree_NJ:
+    conda: "envs/iqtree3.yaml"
+    input: "nasp/nasp_output/matrices/bestsnp.fasta"
+    output:
+        "nasp/nasp_output/matrices/bestsnp.nj.tree"
+    log: "logs/decent-nj.log"
+    threads: 40
+    message:
+        """
+        Creating a DeCentTree NJ tree from the NASP bestsnp.fasta alignment.
+        """
+    shell:
+        """
+            decenttree -fasta {input} -out {output} -nt {threads} > {log} 2>&1
+            echo "DeCentTree NJ tree written to {output}, use this for quick visualization."
+        """
+
+
+
+## Run with iqtree2 using ModelFinder Plus for best realistic model
 rule iqtree_MFP:
     conda: "envs/iqtree.yaml"
     input: "nasp/nasp_output/matrices/bestsnp.fasta"
@@ -162,7 +202,43 @@ rule iqtree_MFP:
         iqtree2 -s {input} -m MFP+ASC -bb 1000 -nt AUTO -pre iqtree/Samples-MFP > {log} 2>&1
         """  
 
-           
+
+## Run with iqtree3 for large datasets
+rule iqtree3_large:
+    conda: "envs/iqtree3.yaml"
+    input: "nasp/nasp_output/matrices/bestsnp.fasta"
+    output:
+        "iqtree/Samples-iqtree3-large.contree"  
+    log: "logs/iqtree3-large.log"
+    threads: 10 # number of threads for iqtree3 is set to AUTO, so this is just for Snakemake resource management
+    message:
+        """
+        Running IQ-TREE3 on large dataset with GTR+ASC+G model, 1000 SH-aLRT and 1000 ultrafast bootstrap replicates.
+        """
+    shell:
+        """
+        mkdir -p $(dirname {output})  # Ensure the iqtree directory exists
+        iqtree -s {input} -m GTR+ASC+G -alrt 1000 -bb 1000 -nt AUTO -pre iqtree/Samples-iqtree3-large -safe > {log} 2>&1
+        """           
+
+## Run with iqtree3 for large datasets with pathogen model for low divergence
+rule iqtree3_large_alt:
+    conda: "envs/iqtree3.yaml"
+    input: "nasp/nasp_output/matrices/bestsnp.fasta"
+    output:
+        "iqtree/Samples-iqtree3-large-alt.contree"  
+    log: "logs/iqtree3-large-alt.log"
+    threads: 10 # number of threads for iqtree3 is set to AUTO, so this is just for Snakemake resource management
+    message:
+        """
+        Running IQ-TREE3 on large dataset with GTR+ASC+G pathogen model, 1000 SH-aLRT and 1000 ultrafast bootstrap replicates.
+        """
+    shell:
+        """
+        mkdir -p $(dirname {output})  # Ensure the iqtree directory exists
+        iqtree -s {input} -m GTR+ASC+G -pathogen -alrt 1000 -bb 1000 -nt AUTO -pre iqtree/Samples-iqtree3-large-alt -safe > {log} 2>&1
+        """           
+
 
 rule bwa:
 	conda: "envs/bwasam.yaml"

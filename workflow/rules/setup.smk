@@ -11,9 +11,10 @@ rule setup:
 
 rule install_nasp:
     conda: "../envs/nasp.yaml"
-    output: "tools/NASP/nasp/nasptool_linux_64"
+    output: ["tools/NASP/nasp/nasptool_linux_64", directory("tools/NASP/nasp")]
     params:
         version="v1.2.1-p1md"
+    log: "install_nasp.log"
     message:
         "Installing NASP version {params.version}"
     shell:
@@ -21,8 +22,10 @@ rule install_nasp:
         mkdir -p tools
         cd tools
         rm -rf NASP
-        git clone --branch {params.version} https://github.com/mdondrup/NASP.git  
-        cd NASP/nasp/nasptool
-        go build -o ../nasptool_linux_64
+        git clone --branch {params.version} https://github.com/mdondrup/NASP.git  > {log} 2>&1
+        pip install -e NASP/
+        cd ./NASP/nasp/nasptool
+        go build -o ../nasptool_linux_64 >> {log} 2>&1
+        cd ../../../..
         """ 
           
