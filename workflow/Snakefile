@@ -423,11 +423,36 @@ for method in ["filtered-variantcalls", "selected-SNPINDEL"]:
         name: "bcftools_stats_{method}"
         conda: "envs/bcftools.yaml"
         input: vcf="vcf/{method}_Ploidy{ploidy}.vcf"
-        output: stats="vcf/{method}_Ploidy{ploidy}.stats"
+        output: stats="vcf/{method}_Ploidy{ploidy}.stats",
+				summary="vcf/{method}_Ploidy{ploidy}.summary"
         shell:
             """
             bcftools stats -s - {input.vcf} > {output.stats}
-          
+          	awk -F"\t" '$1 == "PSC" {
+    sample = $3;
+    nRefHom = $4 + 0;
+    nNonRefHom = $5 + 0;
+    nHet = $6 + 0;
+    nTi = $7 + 0;
+    nTv = $8 + 0;
+    avgDepth = $10 + 0;
+    nMissing = $14 + 0;
+
+    totalCalled = nRefHom + nNonRefHom + nHet;
+    totalSites = totalCalled + nMissing;
+
+    hetRatio = (totalCalled > 0) ? nHet / totalCalled : "NA";
+    missingPct = (totalSites > 0) ? (nMissing / totalSites) * 100 : "NA";
+    titv = (nTv > 0) ? nTi / nTv : "NA";
+
+    printf "%s\t%d\t%d\t%d\t%d\t%.6f\t%.2f\t%.2f\t%s\n",
+        sample, nRefHom, nNonRefHom, nHet, nMissing,
+        (hetRatio == "NA" ? 0 : hetRatio),
+        (missingPct == "NA" ? 0 : missingPct),
+        avgDepth,
+        (titv == "NA" ? "NA" : sprintf("%.3f", titv));
+}' {output.stats} > {output.summary}
+
 
             """
 
