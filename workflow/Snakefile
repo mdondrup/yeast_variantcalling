@@ -1,31 +1,45 @@
 # Snake file for running variant detection with GATK
 # Runs the WF on all fastq files in a directory
 from snakemake.utils import min_version
+
 min_version("8.2")
 
+
 configfile: "config/config.yaml"
+
+
 # configure reference genomes here:
-REFERENCE="../reference-genome/GCF_000146045.2_R64_genomic.fna"
-REF_NOMT="../reference-genome/GCF_000146045.2_R64_genomic-sine-mt.fna"
+REFERENCE = "reference-genome/GCF_000146045.2_R64_genomic.fna"
+REF_NOMT = "reference-genome/GCF_000146045.2_R64_genomic-sine-mt.fna"
 # Ploidy settings for GATK; runs the workflow for each value if multiple values are specified.
-PLOIDY=[2,4]
+PLOIDY = [2, 4]
 
 import os
 import re
+
 
 onsuccess:
     print("Workflow finished, no error")
     # Uncomment this if you have a messenger script installed.
     # shell("send_message.py 'Variant pipeline finished, no error'")
 
+
+
 onerror:
     print("An error occurred, see the log")
     # shell("send_message.py 'An error occurred in Variant pipeline, see the log: {log}'")
-    
+
+
+
 onstart:
-    print ("----------------------------------------------------------------------------")
-    print ("Starting Variant analysis pipeline")
-    print ("----------------------------------------------------------------------------")
+    print(
+        "----------------------------------------------------------------------------"
+    )
+    print("Starting Variant analysis pipeline")
+    print("Reference genome: " + REFERENCE)
+    print(
+        "----------------------------------------------------------------------------"
+    )
     # shell('send_message.py "Variant pipeline started at $(date)"')
 
 
@@ -33,55 +47,84 @@ onstart:
 include: "rules/download.smk"
 include: "rules/setup.smk"
 
+
 ## automatically retrieve all the samples
+
 
 def get_samples(wildcards):
     if not os.path.exists("Fastqs"):
-        return []   
+        return []
     fastqdir = "Fastqs/"
     suffix1 = "_R1_001.fastq.gz"
     suffix2 = "_R1_merged_001.fastq.gz"
-    suffix3 = "_1.fastq.gz"	
-    return [f.replace(suffix1, "").replace(suffix2, '').replace(suffix3, '') 
-	for f in os.listdir(fastqdir) if f.endswith(suffix1) or f.endswith(suffix2) or f.endswith(suffix3)]
-    
+    suffix3 = "_1.fastq.gz"
+    return [
+        f.replace(suffix1, "").replace(suffix2, "").replace(suffix3, "")
+        for f in os.listdir(fastqdir)
+        if f.endswith(suffix1) or f.endswith(suffix2) or f.endswith(suffix3)
+    ]
+
+
 SAMPLES = get_samples(None)
-#print (SAMPLES)
+# print (SAMPLES)
 
-print("Found "+ str(len(SAMPLES)) +" samples.")
+print("Found " + str(len(SAMPLES)) + " samples.")
 
-#Functionn to get the fastq file pair
+# Functionn to get the fastq file pair
+
 
 def get_illumina_fastqs(wildcards):
     fastq_dir = "Fastqs"
-    r1 = [os.path.join(fastq_dir, f) for f in os.listdir(fastq_dir) 
-		if (re.search('^' + wildcards.sample + ".*R1_.*001\\.fastq\\.gz$", f) or re.search('^' + wildcards.sample + ".*_1\\.fastq.gz$", f) )]
-    r2 = [os.path.join(fastq_dir, f) for f in os.listdir(fastq_dir)
-                if (re.search('^' + wildcards.sample + ".*R2_.*001\\.fastq\\.gz$", f) or re.search('^' + wildcards.sample + ".*_2\\.fastq.gz$", f) )]
-    #print("Sample: " + wildcards.sample)
-    #print('  - R1: ' + r1[0] + ' R2:' + r2[0] )
+    r1 = [
+        os.path.join(fastq_dir, f)
+        for f in os.listdir(fastq_dir)
+        if (
+            re.search("^" + wildcards.sample + ".*R1_.*001\\.fastq\\.gz$", f)
+            or re.search("^" + wildcards.sample + ".*_1\\.fastq.gz$", f)
+        )
+    ]
+    r2 = [
+        os.path.join(fastq_dir, f)
+        for f in os.listdir(fastq_dir)
+        if (
+            re.search("^" + wildcards.sample + ".*R2_.*001\\.fastq\\.gz$", f)
+            or re.search("^" + wildcards.sample + ".*_2\\.fastq.gz$", f)
+        )
+    ]
+    # print("Sample: " + wildcards.sample)
+    # print('  - R1: ' + r1[0] + ' R2:' + r2[0] )
 
-    return ([r1[0], r2[0]])
+    return [r1[0], r2[0]]
+
+
 #
 
+
 rule all:
-	input:
-            setup=".setup_done",
-		#r1trimmed=expand("fastp/{sample}.trimmed.1.fastq.gz", sample=SAMPLES),
-		#r2trimmed=expand("fastp/{sample}.trimmed.2.fastq.gz", sample=SAMPLES)
-		#bam = expand("aligned/{sample}.markdup.bam", sample=SAMPLES)		
-		#gvcfidx=expand("vcf/{sample}.Ploidy{ploidy}.g.vcf.idx", sample=SAMPLES, ploidy=PLOIDY),
-            stats1=expand("vcf/joint-variantcalls_Ploidy{ploidy}.stats", ploidy=PLOIDY),
-            stats2=expand("vcf/selected-SNPINDEL_Ploidy{ploidy}.stats", ploidy=PLOIDY),
-            assm=expand("spades/{sample}-spades-assm", sample=SAMPLES),
-            bestsnps="nasp/nasp_output/matrices/bestsnp.fasta",
-            iqtree="iqtree/Samples-MFP.contree"  
+    input:
+        setup=".setup_done",
+        stats1=expand("vcf/joint-variantcalls_Ploidy{ploidy}.stats", ploidy=PLOIDY),
+        stats2=expand("vcf/selected-SNPINDEL_Ploidy{ploidy}.stats", ploidy=PLOIDY),
+        assm=expand("spades/{sample}-spades-assm", sample=SAMPLES),
+        bestsnps="nasp/nasp_output/matrices/bestsnp.fasta",
+        iqtree="iqtree/Samples-MFP.contree",
+
+
+## calling only variants with GATK
+rule variant_calling:
+    input:
+        stats1=expand("vcf/joint-variantcalls_Ploidy{ploidy}.stats", ploidy=PLOIDY),
+        stats2=expand("vcf/selected-SNPINDEL_Ploidy{ploidy}.stats", ploidy=PLOIDY),
+    message:
+        "Variant calling finished"
+
 
 ## running only the phylogenetics part, no variant calling
 rule phylo:
     input:
         bestsnps="nasp/nasp_output/matrices/bestsnp.fasta",
-        iqtree="iqtree/Samples-MFP.contree"
+        iqtree="iqtree/Samples-MFP.contree",
+
 
 ## running only the large phylo part, no variant calling
 rule phylo_large:
@@ -89,36 +132,40 @@ rule phylo_large:
         bestsnps="nasp/nasp_output/matrices/bestsnp.fasta",
         iqtree="iqtree/Samples-iqtree3-large.contree",
         iqtree_alt="iqtree/Samples-iqtree3-large-alt.contree",
-        decenttree="nasp/nasp_output/matrices/bestsnp.nj.tree"
+        decenttree="nasp/nasp_output/matrices/bestsnp.nj.tree",
     message:
         """
         Completed large phylogenetic analysis with IQ-TREE3 and DeCentTree.
-        """        
-
+        """
 
 
 rule fastp_pe:
-	conda: "envs/fastp.yaml"
-	input:
-		r=get_illumina_fastqs
-	output:
-		r1="fastp/{sample}.trimmed.1.fastq.gz",
-		r2="fastp/{sample}.trimmed.2.fastq.gz",
-		html="fastp/{sample}.fastp_report.html",
-		json="fastp/{sample}.fastp_report.json"
-	threads: 2
-	shell:
-		"""
-	fastp -w 10 -i {input.r[0]} -I {input.r[1]} -o {output.r1} -O {output.r2}  -j {output.json} -h {output.html}
-		"""
+    conda:
+        "envs/fastp.yaml"
+    input:
+        r=get_illumina_fastqs,
+    output:
+        r1="fastp/{sample}.trimmed.1.fastq.gz",
+        r2="fastp/{sample}.trimmed.2.fastq.gz",
+        html="fastp/{sample}.fastp_report.html",
+        json="fastp/{sample}.fastp_report.json",
+    threads: 2
+    shell:
+        """
+    fastp -w 10 -i {input.r[0]} -I {input.r[1]} -o {output.r1} -O {output.r2}  -j {output.json} -h {output.html}
+        """
+
 
 rule spades_assembly:
-    conda: "envs/spades.yaml"
-    input: 
+    conda:
+        "envs/spades.yaml"
+    input:
         r1="fastp/{sample}.trimmed.1.fastq.gz",
-        r2="fastp/{sample}.trimmed.2.fastq.gz"
-    output: "spades/{sample}-spades-assm/scaffolds.fasta"
-    log: "logs/spades-{sample}.log"
+        r2="fastp/{sample}.trimmed.2.fastq.gz",
+    output:
+        "spades/{sample}-spades-assm/scaffolds.fasta",
+    log:
+        "logs/spades-{sample}.log",
     threads: 120
     shell:
         r"""
@@ -127,26 +174,32 @@ rule spades_assembly:
 
         """
 
-rule copy_nasp_input: 
+
+rule copy_nasp_input:
     input:
-        "spades/{sample}-spades-assm/scaffolds.fasta"
+        "spades/{sample}-spades-assm/scaffolds.fasta",
     output:
-        "nasp/{sample}.fasta"
-    shell:      
+        "nasp/{sample}.fasta",
+    shell:
         """
         mkdir -p nasp
         cp {input} {output}
         """
 
+
 rule run_nasp:
-    conda: "envs/nasp.yaml"
-    input: expand("nasp/{sample}.fasta", sample=SAMPLES)
-    output: ensure("nasp/nasp_output/matrices/bestsnp.fasta", non_empty=True)
-    log: "nasp/nasp_output/runlog.txt"
-    params: 
-        ref=REF_NOMT
-    threads: 1000 # make sure it's run interactively 
-    message: 
+    conda:
+        "envs/nasp.yaml"
+    input:
+        expand("nasp/{sample}.fasta", sample=SAMPLES),
+    output:
+        ensure("nasp/nasp_output/matrices/bestsnp.fasta", non_empty=True),
+    log:
+        "nasp/nasp_output/runlog.txt",
+    params:
+        ref=REF_NOMT,
+    threads: 1000  # make sure it's run interactively 
+    message:
         """
         Starting interactive NASP run. This rule attempts to wait for the NASP pipeline to complete. 
         This may or may not work depending on your OS because NASP is a pipeline on its own. 
@@ -155,7 +208,7 @@ rule run_nasp:
           micromamba activate nasp
           cd nasp
           nasp {params.ref} nasp_output
-        """   
+        """
     shell:
         """
         rm -f {log}
@@ -167,15 +220,19 @@ rule run_nasp:
         # wait for all jobs to finish
         while $(kill -0 $JOBS 2>/dev/null); do echo "." ; sleep 30; done; 
 
-        """        
+        """
+
 
 ## create a decent tree with neighbor joining from the bestsnp.fasta
 rule descent_tree_NJ:
-    conda: "envs/iqtree3.yaml"
-    input: "nasp/nasp_output/matrices/bestsnp.fasta"
+    conda:
+        "envs/iqtree3.yaml"
+    input:
+        "nasp/nasp_output/matrices/bestsnp.fasta",
     output:
-        "nasp/nasp_output/matrices/bestsnp.nj.tree"
-    log: "logs/decent-nj.log"
+        "nasp/nasp_output/matrices/bestsnp.nj.tree",
+    log:
+        "logs/decent-nj.log",
     threads: 40
     message:
         """
@@ -188,29 +245,34 @@ rule descent_tree_NJ:
         """
 
 
-
 ## Run with iqtree2 using ModelFinder Plus for best realistic model
 rule iqtree_MFP:
-    conda: "envs/iqtree.yaml"
-    input: "nasp/nasp_output/matrices/bestsnp.fasta"
+    conda:
+        "envs/iqtree.yaml"
+    input:
+        "nasp/nasp_output/matrices/bestsnp.fasta",
     output:
-        "iqtree/Samples-MFP.contree"  
-    log: "logs/iqtree-MFP.log"
+        "iqtree/Samples-MFP.contree",
+    log:
+        "logs/iqtree-MFP.log",
     shell:
         """
         mkdir -p $(dirname {output})  # Ensure the iqtree directory exists
         iqtree2 -s {input} -m MFP+ASC -bb 1000 -nt AUTO -pre iqtree/Samples-MFP > {log} 2>&1
-        """  
+        """
 
 
 ## Run with iqtree3 for large datasets
 rule iqtree3_large:
-    conda: "envs/iqtree3.yaml"
-    input: "nasp/nasp_output/matrices/bestsnp.fasta"
+    conda:
+        "envs/iqtree3.yaml"
+    input:
+        "nasp/nasp_output/matrices/bestsnp.fasta",
     output:
-        "iqtree/Samples-iqtree3-large.contree"  
-    log: "logs/iqtree3-large.log"
-    threads: 10 # number of threads for iqtree3 is set to AUTO, so this is just for Snakemake resource management
+        "iqtree/Samples-iqtree3-large.contree",
+    log:
+        "logs/iqtree3-large.log",
+    threads: 10  # number of threads for iqtree3 is set to AUTO, so this is just for Snakemake resource management
     message:
         """
         Running IQ-TREE3 on large dataset with GTR+ASC+G model, 1000 SH-aLRT and 1000 ultrafast bootstrap replicates.
@@ -219,16 +281,20 @@ rule iqtree3_large:
         """
         mkdir -p $(dirname {output})  # Ensure the iqtree directory exists
         iqtree -s {input} -m GTR+ASC+G -alrt 1000 -bb 1000 -nt AUTO -pre iqtree/Samples-iqtree3-large -safe > {log} 2>&1
-        """           
+        """
+
 
 ## Run with iqtree3 for large datasets with pathogen model for low divergence
 rule iqtree3_large_alt:
-    conda: "envs/iqtree3.yaml"
-    input: "nasp/nasp_output/matrices/bestsnp.fasta"
+    conda:
+        "envs/iqtree3.yaml"
+    input:
+        "nasp/nasp_output/matrices/bestsnp.fasta",
     output:
-        "iqtree/Samples-iqtree3-large-alt.contree"  
-    log: "logs/iqtree3-large-alt.log"
-    threads: 10 # number of threads for iqtree3 is set to AUTO, so this is just for Snakemake resource management
+        "iqtree/Samples-iqtree3-large-alt.contree",
+    log:
+        "logs/iqtree3-large-alt.log",
+    threads: 10  # number of threads for iqtree3 is set to AUTO, so this is just for Snakemake resource management
     message:
         """
         Running IQ-TREE3 on large dataset with GTR+ASC+G pathogen model, 1000 SH-aLRT and 1000 ultrafast bootstrap replicates.
@@ -237,85 +303,143 @@ rule iqtree3_large_alt:
         """
         mkdir -p $(dirname {output})  # Ensure the iqtree directory exists
         iqtree -s {input} -m GTR+ASC+G -pathogen -alrt 1000 -bb 1000 -nt AUTO -pre iqtree/Samples-iqtree3-large-alt -safe > {log} 2>&1
-        """           
+        """
+
+
+rule bwa_index:
+    conda:
+        "envs/bwasam.yaml"
+    input:
+        ref=REFERENCE,
+    output:
+        refindex=multiext(REFERENCE, ".bwt", ".pac", ".ann", ".amb", ".sa"),
+    shell:
+        """
+        bwa index {input.ref}
+        """
+
+rule samtools_faidx:
+    conda:
+        "envs/bwasam.yaml"
+    input:
+        ref=REFERENCE,
+    output:
+        fai=REFERENCE + ".fai",
+    shell:
+        """
+        samtools faidx {input.ref}
+        """
+
+rule gatk_fasta_dict:
+    conda:
+        "envs/gatk4.yaml"
+    input:
+        ref=REFERENCE,
+    output:
+        dict=REFERENCE.replace(".fna", ".dict"),
+    shell:
+        """
+        gatk CreateSequenceDictionary -R {input.ref} -O {output.dict}
+        """ 
 
 
 rule bwa:
-	conda: "envs/bwasam.yaml"
-	input: 
-		r1="fastp/{sample}.trimmed.1.fastq.gz",
-		r2="fastp/{sample}.trimmed.2.fastq.gz",
-		ref=REFERENCE
-	output:
-		bam="aligned/{sample}.aligned.bam",
-		bai="aligned/{sample}.aligned.bam.bai"	
-	threads: 30
-	shell:
-		"""
-		set -x
-		ID={wildcards.sample}
-		echo $ID
-		RGSTR="@RG\\tID:$ID\\tSM:sample_$ID"
-        	bwa mem -t{threads} -R "$RGSTR" {input.ref} {input.r1} {input.r2} | samtools sort -@ {threads} -o {output.bam} -
-        	samtools index {output.bam}
-		"""
+    conda:
+        "envs/bwasam.yaml"
+    input:
+        r1="fastp/{sample}.trimmed.1.fastq.gz",
+        r2="fastp/{sample}.trimmed.2.fastq.gz",
+        ref=REFERENCE,
+        refindex=multiext(REFERENCE, ".bwt", ".pac", ".ann", ".amb", ".sa"),
+    output:
+        bam="aligned/{sample}.aligned.bam",
+        bai="aligned/{sample}.aligned.bam.bai",
+    threads: 30
+    shell:
+        """
+        set -x
+        ID={wildcards.sample}
+        echo $ID
+        RGSTR="@RG\\tID:$ID\\tSM:sample_$ID"
+            bwa mem -t{threads} -R "$RGSTR" {input.ref} {input.r1} {input.r2} | samtools sort -@ {threads} -o {output.bam} -
+            samtools index {output.bam}
+        """
+
 
 rule samtools_filter:
-	conda: "envs/bwasam.yaml"
-	input:  bam="aligned/{sample}.aligned.bam",
-                bai="aligned/{sample}.aligned.bam.bai"
-	output: bam="aligned/{sample}.filtered.bam",
-                bai="aligned/{sample}.filtered.bam.bai"
-	threads: 30
-	shell: 
-		"""
-	samtools view -@ {threads} -bq 50 {input.bam} | samtools sort -@ {threads} -o {output.bam}
+    conda:
+        "envs/bwasam.yaml"
+    input:
+        bam="aligned/{sample}.aligned.bam",
+        bai="aligned/{sample}.aligned.bam.bai",
+    output:
+        bam="aligned/{sample}.filtered.bam",
+        bai="aligned/{sample}.filtered.bam.bai",
+    threads: 30
+    shell:
+        """
+    samtools view -@ {threads} -bq 50 {input.bam} | samtools sort -@ {threads} -o {output.bam}
         samtools index {output.bam}
-		"""
+        """
+
+
 rule mark_duplicates:
-	conda: "envs/gatk4.yaml"
-	input: bam="aligned/{sample}.filtered.bam",
-               bai="aligned/{sample}.filtered.bam.bai"
-	output: bam="aligned/{sample}.markdup.bam",
-                bai="aligned/{sample}.markdup.bam.bai"
-	params:
-		reference=REFERENCE
-	threads: 60
-	resources: tmpdir="/export/scratch/tmp",
-		mem="200G"
-	shell:
-		"""
-		mkdir -p $TMPDIR
-		JAVA_OPTS="-Xmx{resources.mem} -Djava.io.tmpdir=$TMPDIR"
-		gatk --java-options "$JAVA_OPTS" MarkDuplicatesSpark --spark-master local[{threads}] \
-		-R {params.reference} -I {input.bam} -O {output.bam}
-		"""
+    conda:
+        "envs/gatk4.yaml"
+    input:
+        bam="aligned/{sample}.filtered.bam",
+        bai="aligned/{sample}.filtered.bam.bai",
+        reference=REFERENCE,
+        fai=REFERENCE + ".fai",
+        dict=REFERENCE.replace(".fna", ".dict"),
+    output:
+        bam="aligned/{sample}.markdup.bam",
+        bai="aligned/{sample}.markdup.bam.bai",
+    threads: 60
+    resources:
+        mem="100G",
+    shell:
+        """
+        JAVA_OPTS="-Xmx{resources.mem} -Djava.io.tmpdir={resources.tmpdir}"
+        gatk --java-options "$JAVA_OPTS" MarkDuplicatesSpark --spark-master local[{threads}] \
+        -R {input.reference} -I {input.bam} -O {output.bam}
+        """
+
 
 rule haplotype_caller:
-	conda: "envs/gatk4.yaml"
-	input: bam="aligned/{sample}.markdup.bam"
-	output: gvcf="vcf/{sample}.Ploidy{ploidy}.g.vcf"
-	params: reference=REFERENCE
-	threads: 30
-	resources: tmpdir="/export/scratch/tmp",
-		mem="256G"
-	shell:
-		"""
-		JAVA_OPTS="-XX:ConcGCThreads=10 -XX:ParallelGCThreads=10 -Xmx{resources.mem} -Djava.io.tmpdir=$TMPDIR"
-		gatk --java-options "$JAVA_OPTS" HaplotypeCaller --ploidy {wildcards.ploidy} --native-pair-hmm-threads {threads} \
-		-R {params.reference} -G StandardAnnotation -G AS_StandardAnnotation -G StandardHCAnnotation \
-   		--tmp-dir $TMPDIR \
-   		-I {input.bam} -O {output.gvcf} -ERC GVCF 
-		"""
+    conda:
+        "envs/gatk4.yaml"
+    input:
+        bam="aligned/{sample}.markdup.bam",
+        bai="aligned/{sample}.markdup.bam.bai",
+        dict=REFERENCE.replace(".fna", ".dict"),
+        reference=REFERENCE,
+        fai=REFERENCE + ".fai",
+    output:
+        gvcf="vcf/{sample}.Ploidy{ploidy}.g.vcf",
+    threads: 60
+    resources:
+        mem="256G",
+    shell:
+        """
+        JAVA_OPTS="-XX:ConcGCThreads=10 -XX:ParallelGCThreads=10 -Xmx{resources.mem} -Djava.io.tmpdir=$TMPDIR"
+        gatk --java-options "$JAVA_OPTS" HaplotypeCaller --ploidy {wildcards.ploidy} --native-pair-hmm-threads {threads} \
+        -R {input.reference} -G StandardAnnotation -G AS_StandardAnnotation -G StandardHCAnnotation \
+           --tmp-dir $TMPDIR \
+           -I {input.bam} -O {output.gvcf} -ERC GVCF 
+        """
+
+
 rule index_vcf:
-    conda: "envs/gatk4.yaml"
-    input: "vcf/{sample}.Ploidy{ploidy}.g.vcf"
-    output:  "vcf/{sample}.Ploidy{ploidy}.g.vcf.idx"
+    conda:
+        "envs/gatk4.yaml"
+    input:
+        "vcf/{sample}.Ploidy{ploidy}.g.vcf",
+    output:
+        "vcf/{sample}.Ploidy{ploidy}.g.vcf.idx",
     threads: 10
-    resources: tmpdir="/export/scratch/tmp",
-	       mem="200G"
-
-
+    resources:
+        mem="200G",
     shell:
         """
         JAVA_OPTS="-XX:ConcGCThreads=10 -XX:ParallelGCThreads=10 -Xmx200G -Djava.io.tmpdir={resources.tmpdir}"
@@ -323,24 +447,30 @@ rule index_vcf:
 
         """
 
-               
-INTERVALS=" -L NC_001133.9 -L NC_001134.8 -L NC_001135.5 -L NC_001136.10 -L NC_001137.3 -L NC_001138.5 -L NC_001139.9 -L NC_001140.6 -L NC_001141.2 -L NC_001142.9 -L NC_001143.9 -L NC_001144.5 -L NC_001145.3 -L NC_001146.8 -L NC_001147.6 -L NC_001148.4 "
+
+INTERVALS = " -L NC_001133.9 -L NC_001134.8 -L NC_001135.5 -L NC_001136.10 -L NC_001137.3 -L NC_001138.5 -L NC_001139.9 -L NC_001140.6 -L NC_001141.2 -L NC_001142.9 -L NC_001143.9 -L NC_001144.5 -L NC_001145.3 -L NC_001146.8 -L NC_001147.6 -L NC_001148.4 "
 
 
-#for ploidy in PLOIDY:
+# for ploidy in PLOIDY:
+
 
 rule:
-    name: "dbimport_joint_call_{ploidy}"
-    conda: "envs/gatk4.yaml"
-    input: gvcfs=expand("vcf/{sample}.Ploidy{{ploidy}}.g.vcf", sample=SAMPLES),
-           gvcfidx=expand("vcf/{sample}.Ploidy{{ploidy}}.g.vcf.idx", sample=SAMPLES)
-    output: dir=directory("vcf/GenomeDB_Ploidy{ploidy}"),
-            vcf="vcf/joint-variantcalls_Ploidy{ploidy}.vcf"
+    name:
+        "dbimport_joint_call_{ploidy}"
+    conda:
+        "envs/gatk4.yaml"
+    input:
+        gvcfs=expand("vcf/{sample}.Ploidy{{ploidy}}.g.vcf", sample=SAMPLES),
+        gvcfidx=expand("vcf/{sample}.Ploidy{{ploidy}}.g.vcf.idx", sample=SAMPLES),
+        reference=REFERENCE,
+        dict=REFERENCE.replace(".fna", ".dict"),
+    output:
+        dir=directory("vcf/GenomeDB_Ploidy{ploidy}"),
+        vcf="vcf/joint-variantcalls_Ploidy{ploidy}.vcf",
     threads: 10
-    params: reference=REFERENCE
-    resources: tmpdir="/export/scratch/tmp",
-	       mem="200G"
-               
+       
+    resources:
+        mem="200G",
     shell:
         r"""
     JAVA_OPTS="-XX:ConcGCThreads=10 -XX:ParallelGCThreads=10 -Xmx200G -Djava.io.tmpdir={resources.tmpdir}"         
@@ -363,26 +493,32 @@ rule:
     
     gatk --java-options "$JAVA_OPTS" GenotypeGVCFs \
     --tmp-dir $TMPDIR \
-    -R {params.reference} \
+    -R {input.reference} \
     -V gendb://$DB \
     -G StandardAnnotation -G AS_StandardAnnotation \
     -O {output.vcf}    
         """
-    
+
+
 rule gatk_variant_filtration:
-    conda: "envs/gatk4.yaml"
-    input: "vcf/joint-variantcalls_Ploidy{ploidy}.vcf"
-    output: "vcf/filtered-variantcalls_Ploidy{ploidy}.vcf"
-    params: reference=REFERENCE
+    conda:
+        "envs/gatk4.yaml"
+    input:
+        vcf="vcf/joint-variantcalls_Ploidy{ploidy}.vcf",
+        reference=REFERENCE,
+        dict=REFERENCE.replace(".fna", ".dict"),
+
+    output:
+        "vcf/filtered-variantcalls_Ploidy{ploidy}.vcf",        
     threads: 60
-    resources: tmpdir="/export/scratch/tmp",
-	       mem="200G"
+    resources:
+        mem="200G",
     shell:
         """
     JAVA_OPTS="-XX:ConcGCThreads=10 -XX:ParallelGCThreads=10 -Xmx{resources.mem} -Djava.io.tmpdir=$TMPDIR"
     gatk  --java-options "$JAVA_OPTS" VariantFiltration \
-    -R {params.reference} \
-    -V {input}  \
+    -R {input.reference} \
+    -V {input.vcf}  \
     -O {output} \
     --filter-expression "MQ < 50.00" \
     --filter-name "mapping_quality" \
@@ -393,22 +529,28 @@ rule gatk_variant_filtration:
     --G-filter "GQ < 30" \
     --G-filter-name "genotype_quality_filter" \
     --set-filtered-genotype-to-no-call false  
-        """    
+        """
+
 
 rule gatk_variant_selection:
-    conda: "envs/gatk4.yaml"
-    input: "vcf/filtered-variantcalls_Ploidy{ploidy}.vcf"
-    output: "vcf/selected-SNPINDEL_Ploidy{ploidy}.vcf"       
-    params: reference=REFERENCE
+    conda:
+        "envs/gatk4.yaml"
+    input:
+        vcf="vcf/filtered-variantcalls_Ploidy{ploidy}.vcf",
+        reference=REFERENCE,
+        dict=REFERENCE.replace(".fna", ".dict"),
+    output:
+        "vcf/selected-SNPINDEL_Ploidy{ploidy}.vcf",
+        
     threads: 60
-    resources: tmpdir="/export/scratch/tmp",
-	       mem="200G"
+    resources:
+        mem="200G",
     shell:
         """
     JAVA_OPTS="-XX:ConcGCThreads=10 -XX:ParallelGCThreads=10 -Xmx{resources.mem} -Djava.io.tmpdir=$TMPDIR"
     gatk --java-options "$JAVA_OPTS" SelectVariants \
-   -R {params.reference} \
-   -V {input} \
+   -R {input.reference} \
+   -V {input.vcf} \
    -O {output} \
    --select-type-to-include SNP \
    --select-type-to-include INDEL \
@@ -417,18 +559,23 @@ rule gatk_variant_selection:
    --restrict-alleles-to BIALLELIC
         """
 
+
 for method in ["filtered-variantcalls", "selected-SNPINDEL"]:
-        
+
     rule:
-        name: "bcftools_stats_{method}"
-        conda: "envs/bcftools.yaml"
-        input: vcf="vcf/{method}_Ploidy{ploidy}.vcf"
-        output: stats="vcf/{method}_Ploidy{ploidy}.stats",
-				summary="vcf/{method}_Ploidy{ploidy}.summary"
+        name:
+            "bcftools_stats_{method}"
+        conda:
+            "envs/bcftools.yaml"
+        input:
+            vcf="vcf/{method}_Ploidy{ploidy}.vcf",
+        output:
+            stats="vcf/{method}_Ploidy{ploidy}.stats",
+            summary="vcf/{method}_Ploidy{ploidy}.summary",
         shell:
             """
             bcftools stats -s - {input.vcf} > {output.stats}
-          	awk -F"\t" '$1 == "PSC" {
+              awk -F"\t" '$1 == "PSC" {{
     sample = $3;
     nRefHom = $4 + 0;
     nNonRefHom = $5 + 0;
@@ -451,9 +598,7 @@ for method in ["filtered-variantcalls", "selected-SNPINDEL"]:
         (missingPct == "NA" ? 0 : missingPct),
         avgDepth,
         (titv == "NA" ? "NA" : sprintf("%.3f", titv));
-}' {output.stats} > {output.summary}
+}}' {output.stats} > {output.summary}
 
 
             """
-
-                

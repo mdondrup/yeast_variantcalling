@@ -1,2 +1,4 @@
 ## Add configuratin options
-sra_accessions: "config/tellini-2024-nomix.sorted.clust"
+# sra_accessions: "config/tellini-2024-nomix.sorted.clust"
+sra_accessions: "config/chico3.clust"
+
